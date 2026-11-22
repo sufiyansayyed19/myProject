@@ -1,20 +1,27 @@
-from typing import Protocol
+from abc import ABC, abstractmethod
 from app.core.config import settings
 
 
-class EmailSender(Protocol):
-    def send_verification_code(self, email: str, code: str) -> None: ...
+class EmailSender(ABC):
+    @abstractmethod
+    def send_otp(self, email: str, code: str, expires_minutes: int) -> None:
+        """Deliver a one-time verification code to the user's corporate email."""
 
 
-class ConsoleEmailSender:
-    """Local development sender. Never logs OTPs when ENVIRONMENT=production."""
+class ConsoleEmailSender(EmailSender):
+    """Local development sender. Refuses to log OTPs in production."""
 
-    def send_verification_code(self, email: str, code: str) -> None:
+    def send_otp(self, email: str, code: str, expires_minutes: int) -> None:
         if settings.ENVIRONMENT.lower() == "production":
-            raise RuntimeError("ConsoleEmailSender must not be used in production.")
-        print(f"[DEV EMAIL] Verification code for {email}: {code} (valid {settings.OTP_EXPIRE_MINUTES} min)")
+            raise RuntimeError("ConsoleEmailSender cannot be used in production.")
+        print(
+            f"[DEV EMAIL OTP] To: {email} | Code: {code} | Expires in {expires_minutes} min",
+            flush=True,
+        )
 
 
 def get_email_sender() -> EmailSender:
-    # Future: inspect settings.EMAIL_SENDER_MODE to return an SMTP/provider implementation
-    return ConsoleEmailSender()
+    mode = settings.EMAIL_SENDER_MODE.strip().lower()
+    if mode == "console":
+        return ConsoleEmailSender()
+    raise NotImplementedError(f"Email sender mode '{mode}' is not configured yet.")

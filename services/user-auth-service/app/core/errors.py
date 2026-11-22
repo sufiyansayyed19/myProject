@@ -1,10 +1,10 @@
 import uuid
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 
-class APIError(Exception):
+class AppError(Exception):
     def __init__(self, status_code: int, code: str, message: str):
         self.status_code = status_code
         self.code = code
@@ -17,8 +17,8 @@ def _request_id(request: Request) -> str:
 
 
 def register_exception_handlers(app: FastAPI) -> None:
-    @app.exception_handler(APIError)
-    async def api_error_handler(request: Request, exc: APIError):
+    @app.exception_handler(AppError)
+    async def app_error_handler(request: Request, exc: AppError):
         return JSONResponse(
             status_code=exc.status_code,
             content={
@@ -38,6 +38,19 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "error": {
                     "code": "INVALID_REQUEST",
                     "message": "Request validation failed.",
+                    "request_id": _request_id(request),
+                }
+            },
+        )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={
+                "error": {
+                    "code": "HTTP_ERROR",
+                    "message": str(exc.detail),
                     "request_id": _request_id(request),
                 }
             },

@@ -1,1 +1,3 @@
-# Service-local SQLAlchemy ORM models are imported here.
+from app.models.vehicle import Vehicle
+
+__all__ = ["Vehicle"]

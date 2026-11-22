@@ -1,7 +1,8 @@
 import uuid
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from app.api.v1.vehicles import router as vehicles_router
 from app.core.config import settings
+from app.core.errors import register_exception_handlers
 
 app = FastAPI(title="Corporate Parking — Vehicle Service")
 
@@ -15,19 +16,8 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(request: Request, exc: Exception):
-    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-    return JSONResponse(
-        status_code=500,
-        content={
-            "error": {
-                "code": "INTERNAL_ERROR",
-                "message": "An unexpected error occurred.",
-                "request_id": request_id,
-            }
-        },
-    )
+register_exception_handlers(app)
+app.include_router(vehicles_router)
 
 
 @app.get("/health", tags=["health"])

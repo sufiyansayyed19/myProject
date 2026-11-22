@@ -1,20 +1,21 @@
+import hmac
 import secrets
-import uuid
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Cookie, Depends, Header, Query, Response
+
+from fastapi import APIRouter, Cookie, Depends, Query, Response
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.errors import APIError
+from app.core.errors import AppError
 from app.core.security import (
     create_access_token,
-    decode_access_token,
     generate_otp_code,
     generate_refresh_token,
-    hash_otp,
+    get_current_user,
+    hash_otp_code,
     hash_refresh_token,
     is_allowed_corporate_email,
     normalize_email,
@@ -26,11 +27,11 @@ from app.schemas.auth import (
     MessageResponse,
     RefreshTokenResponse,
     SendCodeRequest,
-    UserResponse,
+    UserProfile,
     VerifyCodeRequest,
 )
 from app.services.email_sender import EmailSender, get_email_sender
-from app.services import google_oauth
+from app.services.google_oauth import GoogleOAuthClient, get_google_oauth_client
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
@@ -43,82 +44,60 @@ def _utcnow() -> datetime:
 
 
 def _as_utc(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
-def _is_secure_cookie() -> bool:
-    return settings.ENVIRONMENT.lower() == "production"
+def _is_cookie_secure() -> bool:
+    return settings.ENVIRONMENT.strip().lower() == "production"
 
 
-def _set_refresh_cookie(response: Response, raw_token: str) -> None:
+def _set_refresh_cookie(response: Response, raw_refresh_token: str) -> None:
     response.set_cookie(
         key=REFRESH_COOKIE_NAME,
-        value=raw_token,
+        value=raw_refresh_token,
         httponly=True,
-        secure=_is_secure_cookie(),
+        secure=_is_cookie_secure(),
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
         path="/api/v1/auth",
     )
 
 
-def _clear_refresh_cookie(response: Response) -> None:
-    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/v1/auth")
-
-
-def _issue_session_and_tokens(db: Session, user: User, response: Response) -> tuple[str, int]:
-    now = _utcnow()
-    raw_refresh = generate_refresh_token()
-    session_row = RefreshSession(
+def _create_refresh_session(db: Session, user: User) -> str:
+    raw_token = generate_refresh_token()
+    session = RefreshSession(
         user_id=user.id,
-        token_hash=hash_refresh_token(raw_refresh),
-        expires_at=now + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
-        created_at=now,
+        token_hash=hash_refresh_token(raw_token),
+        expires_at=_utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
     )
-    db.add(session_row)
-    db.commit()
-
-    access_token, expires_in = create_access_token(user.id)
-    _set_refresh_cookie(response, raw_refresh)
-    return access_token, expires_in
+    db.add(session)
+    return raw_token
 
 
-def get_current_user_id(authorization: str | None = Header(default=None)) -> uuid.UUID:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise APIError(401, "UNAUTHENTICATED", "Missing or invalid authorization header.")
-    token = authorization.split(" ", 1)[1].strip()
-    if not token:
-        raise APIError(401, "UNAUTHENTICATED", "Missing access token.")
-    return decode_access_token(token)
-
-
-# 1. POST /api/v1/auth/company/send-code
 @router.post("/auth/company/send-code", response_model=MessageResponse)
 def send_company_code(
     payload: SendCodeRequest,
     db: Session = Depends(get_db),
     email_sender: EmailSender = Depends(get_email_sender),
 ):
-    email = normalize_email(payload.email)
+    email = normalize_email(str(payload.email))
     if not is_allowed_corporate_email(email):
-        raise APIError(403, "CORPORATE_EMAIL_REQUIRED", "Only corporate email addresses are allowed.")
+        raise AppError(403, "CORPORATE_EMAIL_REQUIRED", "Only corporate email addresses are allowed.")
 
     now = _utcnow()
     latest = db.execute(
         select(VerificationCode)
         .where(VerificationCode.email == email)
-        .order_by(VerificationCode.created_at.desc())
+        .order_by(desc(VerificationCode.created_at))
         .limit(1)
     ).scalar_one_or_none()
 
     if latest is not None:
         elapsed = (now - _as_utc(latest.created_at)).total_seconds()
         if elapsed < settings.OTP_RESEND_COOLDOWN_SECONDS:
-            raise APIError(429, "OTP_RATE_LIMITED", "Please wait before requesting a new verification code.")
+            raise AppError(429, "OTP_RATE_LIMITED", "Please wait before requesting another verification code.")
 
-    # Invalidate any previous active codes in the same transaction
+    # Invalidate any previously active codes for this email in the same transaction
     active_codes = db.execute(
         select(VerificationCode).where(
             VerificationCode.email == email,
@@ -126,72 +105,61 @@ def send_company_code(
             VerificationCode.invalidated_at.is_(None),
         )
     ).scalars().all()
-    for old_code in active_codes:
-        old_code.invalidated_at = now
+    for code_row in active_codes:
+        code_row.invalidated_at = now
 
-    otp_code = generate_otp_code()
-    record = VerificationCode(
+    raw_code = generate_otp_code()
+    verification = VerificationCode(
         email=email,
-        code_hash=hash_otp(email, otp_code),
+        code_hash=hash_otp_code(email, raw_code),
         expires_at=now + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
         attempt_count=0,
-        created_at=now,
     )
-    db.add(record)
+    db.add(verification)
     db.commit()
 
     try:
-        email_sender.send_verification_code(email, otp_code)
-    except Exception as exc:
-        raise APIError(502, "EMAIL_DELIVERY_FAILED", "Failed to deliver verification code.") from exc
+        email_sender.send_otp(email=email, code=raw_code, expires_minutes=settings.OTP_EXPIRE_MINUTES)
+    except Exception:
+        raise AppError(502, "EMAIL_DELIVERY_FAILED", "Unable to deliver verification code.")
 
     return MessageResponse(message="Verification code sent successfully")
 
 
-# 2. POST /api/v1/auth/company/verify
 @router.post("/auth/company/verify", response_model=AuthTokenResponse)
 def verify_company_code(
     payload: VerifyCodeRequest,
     response: Response,
     db: Session = Depends(get_db),
 ):
-    email = normalize_email(payload.email)
-    if not is_allowed_corporate_email(email):
-        raise APIError(403, "CORPORATE_EMAIL_REQUIRED", "Only corporate email addresses are allowed.")
-
+    email = normalize_email(str(payload.email))
     now = _utcnow()
-    record = db.execute(
+
+    verification = db.execute(
         select(VerificationCode)
         .where(
             VerificationCode.email == email,
             VerificationCode.consumed_at.is_(None),
             VerificationCode.invalidated_at.is_(None),
         )
-        .order_by(VerificationCode.created_at.desc())
+        .order_by(desc(VerificationCode.created_at))
         .limit(1)
     ).scalar_one_or_none()
 
-    if record is None or _as_utc(record.expires_at) <= now:
-        raise APIError(401, "INVALID_OR_EXPIRED_CODE", "Verification code is invalid or expired.")
+    if verification is None or _as_utc(verification.expires_at) <= now:
+        raise AppError(401, "INVALID_OR_EXPIRED_CODE", "Verification code is invalid or has expired.")
 
-    if record.attempt_count >= settings.OTP_MAX_ATTEMPTS:
-        record.invalidated_at = now
-        db.commit()
-        raise APIError(429, "OTP_ATTEMPTS_EXCEEDED", "Maximum verification attempts exceeded.")
-
-    if not verify_otp_hash(email, payload.code, record.code_hash):
-        record.attempt_count += 1
-        if record.attempt_count >= settings.OTP_MAX_ATTEMPTS:
-            record.invalidated_at = now
+    if not verify_otp_hash(email, payload.code, verification.code_hash):
+        verification.attempt_count += 1
+        if verification.attempt_count >= settings.OTP_MAX_ATTEMPTS:
+            verification.invalidated_at = now
             db.commit()
-            raise APIError(429, "OTP_ATTEMPTS_EXCEEDED", "Maximum verification attempts exceeded.")
+            raise AppError(429, "OTP_ATTEMPTS_EXCEEDED", "Maximum verification attempts exceeded.")
         db.commit()
-        raise APIError(401, "INVALID_OR_EXPIRED_CODE", "Verification code is invalid or expired.")
+        raise AppError(401, "INVALID_OR_EXPIRED_CODE", "Verification code is invalid or has expired.")
 
-    # Mark code consumed so it cannot be replayed
-    record.consumed_at = now
+    verification.consumed_at = now
 
-    # Resolve or create user + COMPANY_EMAIL identity
     identity = db.execute(
         select(AuthIdentity).where(
             AuthIdentity.provider == "COMPANY_EMAIL",
@@ -204,7 +172,7 @@ def verify_company_code(
     else:
         user = db.execute(select(User).where(User.email == email)).scalar_one_or_none()
         if user is None:
-            user = User(email=email, name=None, created_at=now, updated_at=now)
+            user = User(email=email, name=None)
             db.add(user)
             db.flush()
         db.add(
@@ -213,29 +181,35 @@ def verify_company_code(
                 provider="COMPANY_EMAIL",
                 provider_subject=email,
                 provider_email=email,
-                created_at=now,
             )
         )
 
-    access_token, expires_in = _issue_session_and_tokens(db, user, response)
+    raw_refresh = _create_refresh_session(db, user)
+    db.commit()
+    db.refresh(user)
+
+    access_token, expires_in = create_access_token(user.id)
+    _set_refresh_cookie(response, raw_refresh)
+
     return AuthTokenResponse(
         access_token=access_token,
         expires_in=expires_in,
-        user=UserResponse.model_validate(user),
+        user=UserProfile.model_validate(user),
     )
 
 
-# 3. GET /api/v1/auth/google
 @router.get("/auth/google")
-def start_google_oauth():
+def start_google_oauth(
+    google_client: GoogleOAuthClient = Depends(get_google_oauth_client),
+):
     state = secrets.token_urlsafe(32)
-    url = google_oauth.build_google_authorize_url(state)
-    redirect = RedirectResponse(url=url, status_code=302)
+    auth_url = google_client.build_authorization_url(state=state)
+    redirect = RedirectResponse(url=auth_url, status_code=302)
     redirect.set_cookie(
         key=OAUTH_STATE_COOKIE_NAME,
         value=state,
         httponly=True,
-        secure=_is_secure_cookie(),
+        secure=_is_cookie_secure(),
         samesite="lax",
         max_age=300,
         path="/api/v1/auth/google",
@@ -243,75 +217,75 @@ def start_google_oauth():
     return redirect
 
 
-# 4. GET /api/v1/auth/google/callback
 @router.get("/auth/google/callback")
 def google_oauth_callback(
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
     oauth_state: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE_NAME),
     db: Session = Depends(get_db),
+    google_client: GoogleOAuthClient = Depends(get_google_oauth_client),
 ):
-    if not code or not state or not oauth_state or not secrets.compare_digest(state, oauth_state):
-        raise APIError(400, "INVALID_OAUTH_STATE", "Invalid or missing OAuth state.")
+    if error:
+        raise AppError(401, "GOOGLE_AUTHENTICATION_FAILED", "Google authentication was cancelled or failed.")
 
-    info = google_oauth.exchange_code_for_userinfo(code)
-    if not info.email_verified:
-        raise APIError(401, "GOOGLE_AUTHENTICATION_FAILED", "Google email must be verified.")
+    if not code or not state or not oauth_state or not hmac.compare_digest(state, oauth_state):
+        raise AppError(400, "INVALID_OAUTH_STATE", "Invalid or missing OAuth state.")
 
-    normalized_email = normalize_email(info.email)
-    if not is_allowed_corporate_email(normalized_email):
-        raise APIError(403, "CORPORATE_GOOGLE_ACCOUNT_REQUIRED", "Google account must use the corporate email domain.")
+    google_info = google_client.exchange_code_for_userinfo(code)
+    normalized_email = normalize_email(google_info.email)
 
-    now = _utcnow()
+    if not google_info.email_verified or not is_allowed_corporate_email(normalized_email):
+        raise AppError(
+            403,
+            "CORPORATE_GOOGLE_ACCOUNT_REQUIRED",
+            "A verified corporate Google account is required.",
+        )
+
     identity = db.execute(
         select(AuthIdentity).where(
             AuthIdentity.provider == "GOOGLE",
-            AuthIdentity.provider_subject == info.subject,
+            AuthIdentity.provider_subject == google_info.subject,
         )
     ).scalar_one_or_none()
 
     if identity is not None:
         user = db.get(User, identity.user_id)
+        if user and not user.name and google_info.name:
+            user.name = google_info.name[:100]
     else:
-        # Automatic verified account linking: match verified corporate email
+        # Automatic account linking on verified corporate email match (A-42)
         user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
         if user is None:
-            user = User(email=normalized_email, name=info.name, created_at=now, updated_at=now)
+            user = User(email=normalized_email, name=google_info.name[:100] if google_info.name else None)
             db.add(user)
             db.flush()
-        elif not user.name and info.name:
-            user.name = info.name
-            user.updated_at = now
+        elif not user.name and google_info.name:
+            user.name = google_info.name[:100]
 
         db.add(
             AuthIdentity(
                 user_id=user.id,
                 provider="GOOGLE",
-                provider_subject=info.subject,
+                provider_subject=google_info.subject,
                 provider_email=normalized_email,
-                created_at=now,
             )
         )
 
+    raw_refresh = _create_refresh_session(db, user)
+    db.commit()
+
     redirect = RedirectResponse(url=settings.FRONTEND_AUTH_SUCCESS_URL, status_code=302)
+    _set_refresh_cookie(redirect, raw_refresh)
     redirect.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/api/v1/auth/google")
-    _issue_session_and_tokens(db, user, redirect)
     return redirect
 
 
-# 5. GET /api/v1/users/me
-@router.get("/users/me", response_model=UserResponse)
-def get_me(
-    user_id: uuid.UUID = Depends(get_current_user_id),
-    db: Session = Depends(get_db),
-):
-    user = db.get(User, user_id)
-    if user is None:
-        raise APIError(401, "UNAUTHENTICATED", "User account not found.")
-    return UserResponse.model_validate(user)
+@router.get("/users/me", response_model=UserProfile)
+def get_me(current_user: User = Depends(get_current_user)):
+    return UserProfile.model_validate(current_user)
 
 
-# 6. POST /api/v1/auth/refresh
 @router.post("/auth/refresh", response_model=RefreshTokenResponse)
 def refresh_access_token(
     response: Response,
@@ -319,30 +293,32 @@ def refresh_access_token(
     db: Session = Depends(get_db),
 ):
     if not refresh_token:
-        raise APIError(401, "INVALID_REFRESH_TOKEN", "Missing refresh token.")
+        raise AppError(401, "UNAUTHENTICATED", "Missing refresh session.")
 
     now = _utcnow()
     token_hash = hash_refresh_token(refresh_token)
-    session_row = db.execute(
+    session = db.execute(
         select(RefreshSession).where(RefreshSession.token_hash == token_hash)
     ).scalar_one_or_none()
 
-    if session_row is None or session_row.revoked_at is not None or _as_utc(session_row.expires_at) <= now:
-        _clear_refresh_cookie(response)
-        raise APIError(401, "INVALID_REFRESH_TOKEN", "Refresh token is invalid, expired, or revoked.")
+    if session is None or session.revoked_at is not None or _as_utc(session.expires_at) <= now:
+        raise AppError(401, "UNAUTHENTICATED", "Refresh session is invalid, revoked, or expired.")
 
-    user = db.get(User, session_row.user_id)
+    user = db.get(User, session.user_id)
     if user is None:
-        _clear_refresh_cookie(response)
-        raise APIError(401, "INVALID_REFRESH_TOKEN", "User account not found.")
+        raise AppError(401, "UNAUTHENTICATED", "User not found.")
 
-    # Rotate refresh token: revoke old session and issue new one
-    session_row.revoked_at = now
-    access_token, expires_in = _issue_session_and_tokens(db, user, response)
+    # Rotate refresh token
+    session.revoked_at = now
+    new_raw_refresh = _create_refresh_session(db, user)
+    db.commit()
+
+    access_token, expires_in = create_access_token(user.id)
+    _set_refresh_cookie(response, new_raw_refresh)
+
     return RefreshTokenResponse(access_token=access_token, expires_in=expires_in)
 
 
-# 7. POST /api/v1/auth/logout
 @router.post("/auth/logout", response_model=MessageResponse)
 def logout(
     response: Response,
@@ -351,12 +327,12 @@ def logout(
 ):
     if refresh_token:
         token_hash = hash_refresh_token(refresh_token)
-        session_row = db.execute(
+        session = db.execute(
             select(RefreshSession).where(RefreshSession.token_hash == token_hash)
         ).scalar_one_or_none()
-        if session_row is not None and session_row.revoked_at is None:
-            session_row.revoked_at = _utcnow()
+        if session is not None and session.revoked_at is None:
+            session.revoked_at = _utcnow()
             db.commit()
 
-    _clear_refresh_cookie(response)
+    response.delete_cookie(key=REFRESH_COOKIE_NAME, path="/api/v1/auth")
     return MessageResponse(message="Logged out successfully")

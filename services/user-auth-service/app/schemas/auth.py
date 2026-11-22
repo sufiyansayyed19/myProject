@@ -15,7 +15,7 @@ class MessageResponse(BaseModel):
     message: str
 
 
-class UserResponse(BaseModel):
+class UserProfile(BaseModel):
     id: uuid.UUID
     email: str
     name: str | None = None
@@ -27,7 +27,7 @@ class AuthTokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
-    user: UserResponse
+    user: UserProfile
 
 
 class RefreshTokenResponse(BaseModel):
