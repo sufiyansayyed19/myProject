@@ -1,0 +1,17 @@
+.env
+*.env
+!.env.example
+!services/*/.env.example
+!gateway/.env.example
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local dev RSA keys (never commit)
+keys/
+*.pem
+*.key
