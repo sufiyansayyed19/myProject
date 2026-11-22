@@ -1,0 +1,36 @@
+import uuid
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
+
+
+class SendCodeRequest(BaseModel):
+    email: EmailStr
+
+
+class VerifyCodeRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+class MessageResponse(BaseModel):
+    message: str
+
+
+class UserResponse(BaseModel):
+    id: uuid.UUID
+    email: str
+    name: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    user: UserResponse
+
+
+class RefreshTokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int

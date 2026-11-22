@@ -1,1 +1,3 @@
-# Service-local SQLAlchemy ORM models are imported here.
+from app.models.auth import AuthIdentity, RefreshSession, User, VerificationCode
+
+__all__ = ["User", "AuthIdentity", "VerificationCode", "RefreshSession"]
