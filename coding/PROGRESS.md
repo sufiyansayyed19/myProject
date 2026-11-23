@@ -21,6 +21,6 @@
 | **m2** | User/Auth Service (7 APIs: OTP, Google OAuth + linking, RS256 JWT + refresh) | Done (iter-01) | [m2/iter-01.md](m2/iter-01.md) |
 | **m3** | Vehicle Service (5 APIs: owner-scoped CRUD, soft delete, plate normalization) | Done (iter-01) | [m3/iter-01.md](m3/iter-01.md) |
 | **m4** | Parking Service Core (5 public APIs: availability, booking + locking + idempotency, history, cancel) | Done (iter-01) | [m4/iter-01.md](m4/iter-01.md) |
-| **m5** | Payment Service (3 APIs) + Parking Internal APIs (callback + vehicle dependency check) | Pending | `m5/` |
-| **m6** | API Gateway (`gateway/` reverse proxy, early JWT validation, CORS, header stripping) | Pending | `m6/` |
-| **m7** | End-to-End, Time-Boundary & Concurrency Tests | Pending | `m7/` |
+| **m5** | Payment Service (3 APIs) + Parking Internal APIs (callback + vehicle dependency check) | Done (iter-01) | [m5/iter-01.md](m5/iter-01.md) |
+| **m6** | API Gateway (`gateway/` reverse proxy, early JWT validation, CORS, header stripping) | Done (iter-01) | [m6/iter-01.md](m6/iter-01.md) |
+| **m7** | End-to-End, Time-Boundary & Concurrency Tests | Done (iter-01) | [m7/iter-01.md](m7/iter-01.md) |

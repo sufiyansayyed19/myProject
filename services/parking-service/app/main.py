@@ -1,5 +1,6 @@
 import uuid
 from fastapi import FastAPI, Request
+from app.api.internal import router as internal_router
 from app.api.v1.parking import router as parking_router
 from app.core.config import settings
 from app.core.errors import register_exception_handlers
@@ -18,6 +19,7 @@ async def request_id_middleware(request: Request, call_next):
 
 register_exception_handlers(app)
 app.include_router(parking_router)
+app.include_router(internal_router)
 
 
 @app.get("/health", tags=["health"])

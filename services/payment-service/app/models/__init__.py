@@ -1,1 +1,3 @@
-# Service-local SQLAlchemy ORM models are imported here.
+from app.models.payment import Payment
+
+__all__ = ["Payment"]
