@@ -38,12 +38,11 @@ An eligible employee can:
 - view their bookings and payment details;
 - cancel an eligible confirmed booking.
 
-### 4.2 External identity providers
+### 4.2 External identity/delivery providers
 
-- Corporate email delivery provider: delivers verification codes.
-- Google: provides the OAuth identity flow when the Google account satisfies the corporate-domain policy.
+- Corporate email delivery provider: delivers one-time verification codes (pluggable interface; console mock in local development).
 
-These are external dependencies, not internal microservices.
+This is an external dependency, not an internal microservice. Google OAuth is explicitly excluded; authentication is purely corporate-email OTP based.
 
 ### 4.3 System services
 
@@ -71,8 +70,7 @@ These figures and operating policies are **sample project assumptions**, not uni
 
 ### 6.1 Included in the current scope
 
-- Corporate-domain email verification.
-- Google OAuth as an additional authentication option, subject to corporate-domain validation.
+- Corporate-domain email OTP verification (sole authentication method; Google OAuth dropped).
 - User identity and authenticated profile retrieval.
 - Vehicle registration, listing, retrieval, updating and deactivation.
 - Vehicle classification: `CAR` or `BIKE`.
@@ -121,7 +119,6 @@ These may be reconsidered as future scope if a real business need is established
 
 ### Outside the system
 
-- Google identity platform.
 - Corporate email provider.
 - Physical parking infrastructure and vehicle detection.
 - Banks, UPI networks and real payment providers.

@@ -1,6 +1,6 @@
 # Corporate Parking Reservation System — API Flow Diagrams
 
-Visual guide to all **22 APIs** across the **API Gateway** (`8000`) and **4 Business Microservices** (`8001`–`8004`), reflecting the implemented codebase.
+Visual guide to all **20 APIs** across the **API Gateway** (`8000`) and **4 Business Microservices** (`8001`–`8004`), reflecting the implemented codebase.
 
 ---
 
@@ -32,9 +32,9 @@ flowchart LR
 
 ---
 
-## 2. User/Auth Service (`services/user-auth-service` — Port `8001`, 7 APIs)
+## 2. User/Auth Service (`services/user-auth-service` — Port `8001`, 5 APIs)
 
-### 2.1 Company Email OTP, Profile, Token Refresh & Logout
+Authentication is purely corporate-email OTP based (`COMPANY_EMAIL_DOMAIN`).
 
 ```mermaid
 sequenceDiagram
@@ -83,29 +83,6 @@ sequenceDiagram
     GW->>A: Forward with cookie
     A->>DB: Set revoked_at on session (idempotent)
     A-->>C: 200 {"message": "Logged out successfully"} + Clear cookie
-```
-
-### 2.2 Google OAuth 2.0 & Verified Account Linking
-
-```mermaid
-sequenceDiagram
-    participant B as Browser
-    participant A as User/Auth (:8001)
-    participant G as Google OAuth
-    participant DB as user_db
-
-    B->>A: GET /api/v1/auth/google
-    A-->>B: 302 Redirect to accounts.google.com + Set-Cookie: oauth_state (HttpOnly)
-    B->>G: User signs in & consents
-    G-->>B: 302 Redirect to /api/v1/auth/google/callback?code=...&state=...
-    B->>A: GET /api/v1/auth/google/callback (Cookie: oauth_state)
-    A->>A: Constant-time check state == oauth_state (400 if mismatch)
-    A->>G: POST /token (exchange code) + GET /userinfo
-    G-->>A: {sub, email, email_verified, name}
-    A->>A: Require email_verified=true & corporate domain (403 otherwise)
-    A->>DB: Lookup GOOGLE identity -> else match verified User.email (auto-link!) -> else create User
-    A->>DB: Create RefreshSession
-    A-->>B: 302 Redirect to FRONTEND_AUTH_SUCCESS_URL + Set-Cookie: refresh_token
 ```
 
 ---
@@ -299,7 +276,7 @@ sequenceDiagram
     participant P as Parking (:8003)
     participant PAY as Payment (:8004)
 
-    U->>GW: 1. Login (Email OTP or Google OAuth)
+    U->>GW: 1. Login (Corporate Email OTP)
     GW->>A: Authenticate
     A-->>U: RS256 access_token + HttpOnly refresh_token
 

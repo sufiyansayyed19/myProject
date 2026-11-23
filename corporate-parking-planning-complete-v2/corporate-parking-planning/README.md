@@ -37,7 +37,7 @@ The system manages a limited pool of corporate parking spaces. Eligible employee
 | Component | Type | Primary responsibility |
 |---|---|---|
 | API Gateway | Infrastructure component | Single frontend entry point, routing and common request handling |
-| User/Auth Service | Business microservice | Corporate identity verification, Google OAuth and authentication |
+| User/Auth Service | Business microservice | Corporate-email OTP verification and authentication |
 | Vehicle Service | Business microservice | Registered vehicle records |
 | Parking Service | Business microservice | Availability, slot allocation, bookings, cancellation and fee calculation |
 | Payment Service | Business microservice | Simulated payment lifecycle and result notification |
@@ -46,19 +46,19 @@ The Session Service was deliberately removed. The current business model prices 
 
 ## API inventory count
 
-The baseline contains **22 operations**, counting both public and internal operations:
+The baseline contains **20 operations**, counting both public and internal operations (Google OAuth was dropped in favor of purely corporate-email OTP authentication):
 
 | Service | Operations | Notes |
 |---|---:|---|
-| User/Auth | 7 | Company send-code, company verify, Google start, Google callback, users/me, logout, refresh |
+| User/Auth | 5 | Company send-code, company verify, users/me, logout, refresh |
 | Vehicle | 5 | Create, list, get, update and deactivate |
 | Parking | 7 | Five user-facing operations, Payment result callback, and Vehicle booking-dependency check |
 | Payment | 3 | Internal payment creation plus two user-facing operations |
-| **Total** | **22** | |
+| **Total** | **20** | |
 
 The Payment creation route is documented as `POST /internal/v1/payments` because Parking Service is the caller; it is not a frontend operation. Both `POST /internal/v1/bookings/{booking_id}/payment-result` and `GET /internal/v1/vehicles/{vehicle_id}/booking-dependency` are internal Parking-owned endpoints.
 
-Both previously proposed endpoints (`POST /api/v1/auth/refresh` and `GET /internal/v1/vehicles/{vehicle_id}/booking-dependency`) have been approved and included in the 22-operation baseline.
+Both approved extensions (`POST /api/v1/auth/refresh` and `GET /internal/v1/vehicles/{vehicle_id}/booking-dependency`) are included, while Google OAuth (`/api/v1/auth/google` and `/api/v1/auth/google/callback`) was removed from scope.
 
 ## Decision-status vocabulary
 

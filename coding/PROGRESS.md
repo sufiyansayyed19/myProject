@@ -18,7 +18,7 @@
 |---|---|---|---|
 | **m0** | Finalize planning & sprint-demo decisions | Done | [m0/iter-01.md](m0/iter-01.md) |
 | **m1** | Monorepo scaffold, DB init SQL, Alembic per service, dev RSA keygen, `/health` | Done (iter-01) | [m1/iter-01.md](m1/iter-01.md) |
-| **m2** | User/Auth Service (7 APIs: OTP, Google OAuth + linking, RS256 JWT + refresh) | Done (iter-01) | [m2/iter-01.md](m2/iter-01.md) |
+| **m2** | User/Auth Service (5 APIs: Company Email OTP, RS256 JWT + refresh, logout) | Done (iter-02) | [m2/iter-01.md](m2/iter-01.md), [m2/iter-02.md](m2/iter-02.md) |
 | **m3** | Vehicle Service (5 APIs: owner-scoped CRUD, soft delete, plate normalization) | Done (iter-01) | [m3/iter-01.md](m3/iter-01.md) |
 | **m4** | Parking Service Core (5 public APIs: availability, booking + locking + idempotency, history, cancel) | Done (iter-01) | [m4/iter-01.md](m4/iter-01.md) |
 | **m5** | Payment Service (3 APIs) + Parking Internal APIs (callback + vehicle dependency check) | Done (iter-01) | [m5/iter-01.md](m5/iter-01.md) |

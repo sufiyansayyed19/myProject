@@ -36,12 +36,12 @@ def captured():
 
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(request)
-        if request.url.path == "/api/v1/auth/google":
+        if request.url.path == "/api/v1/auth/company/verify":
             return httpx.Response(
-                302,
+                200,
+                json={"access_token": "tok", "token_type": "bearer", "expires_in": 900},
                 headers={
-                    "Location": "https://accounts.google.com/o/oauth2/v2/auth",
-                    "Set-Cookie": "oauth_state=abc123; HttpOnly; Path=/api/v1/auth/google",
+                    "Set-Cookie": "refresh_token=abc123; HttpOnly; Path=/api/v1/auth",
                 },
             )
         if request.url.path == "/api/v1/parking/down":
@@ -100,14 +100,16 @@ def test_protected_routes_require_valid_jwt_and_strip_internal_token(captured):
     assert "x-request-id" in {k.lower() for k in forwarded_req.headers.keys()}
 
 
-def test_public_auth_routes_preserve_redirects_and_cookies_and_503_on_down(captured):
+def test_public_auth_routes_preserve_cookies_and_503_on_down(captured):
     client = captured["client"]
 
-    # Public /api/v1/auth/google forwards without JWT, preserves 302 + Set-Cookie
-    r_google = client.get("/api/v1/auth/google", follow_redirects=False)
-    assert r_google.status_code == 302
-    assert "accounts.google.com" in r_google.headers["location"]
-    assert "oauth_state=abc123" in r_google.headers.get("set-cookie", "")
+    # Public /api/v1/auth/company/verify forwards without JWT and preserves Set-Cookie
+    r_verify = client.post(
+        "/api/v1/auth/company/verify",
+        json={"email": "alice@company.com", "code": "123456"},
+    )
+    assert r_verify.status_code == 200
+    assert "refresh_token=abc123" in r_verify.headers.get("set-cookie", "")
 
     # Downstream failure returns 503 in standard error envelope
     token = _make_jwt(uuid.uuid4())

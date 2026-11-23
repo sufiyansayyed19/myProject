@@ -1,10 +1,9 @@
-from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -15,9 +14,7 @@ if str(SERVICE_DIR) not in sys.path:
 from app.core.config import settings  # noqa: E402
 from app.core.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402
-from app.models.auth import AuthIdentity, User, VerificationCode  # noqa: E402
 from app.services.email_sender import EmailSender, get_email_sender  # noqa: E402
-from app.services.google_oauth import GoogleOAuthClient, GoogleUserInfo, get_google_oauth_client  # noqa: E402
 
 
 class CapturingEmailSender(EmailSender):
@@ -26,22 +23,6 @@ class CapturingEmailSender(EmailSender):
 
     def send_otp(self, email: str, code: str, expires_minutes: int) -> None:
         self.sent.append((email, code))
-
-
-class FakeGoogleOAuthClient(GoogleOAuthClient):
-    def __init__(self, user_info: GoogleUserInfo | None = None) -> None:
-        self.user_info = user_info or GoogleUserInfo(
-            subject="google-sub-123",
-            email="alice@company.com",
-            email_verified=True,
-            name="Alice Employee",
-        )
-
-    def build_authorization_url(self, state: str) -> str:
-        return f"https://accounts.google.com/o/oauth2/v2/auth?state={state}"
-
-    def exchange_code_for_userinfo(self, code: str) -> GoogleUserInfo:
-        return self.user_info
 
 
 @pytest.fixture()
@@ -55,7 +36,6 @@ def ctx():
     TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False, expire_on_commit=False)
 
     email_sender = CapturingEmailSender()
-    google_client = FakeGoogleOAuthClient()
 
     def override_get_db():
         db = TestingSessionLocal()
@@ -66,14 +46,12 @@ def ctx():
 
     app.dependency_overrides[get_db] = override_get_db
     app.dependency_overrides[get_email_sender] = lambda: email_sender
-    app.dependency_overrides[get_google_oauth_client] = lambda: google_client
 
     client = TestClient(app)
     yield {
         "client": client,
         "db_factory": TestingSessionLocal,
         "email_sender": email_sender,
-        "google_client": google_client,
     }
     app.dependency_overrides.clear()
     Base.metadata.drop_all(bind=engine)
@@ -159,72 +137,10 @@ def test_otp_max_attempts_exhaustion(ctx):
     client = ctx["client"]
     client.post("/api/v1/auth/company/send-code", json={"email": "bob@company.com"})
 
-    for i in range(settings.OTP_MAX_ATTEMPTS - 1):
+    for _ in range(settings.OTP_MAX_ATTEMPTS - 1):
         r = client.post("/api/v1/auth/company/verify", json={"email": "bob@company.com", "code": "999999"})
         assert r.status_code == 401
 
     r_last = client.post("/api/v1/auth/company/verify", json={"email": "bob@company.com", "code": "999999"})
     assert r_last.status_code == 429
     assert r_last.json()["error"]["code"] == "OTP_ATTEMPTS_EXCEEDED"
-
-
-def test_google_oauth_state_validation_and_automatic_account_linking(ctx):
-    client = ctx["client"]
-    sender = ctx["email_sender"]
-
-    # First login via company email OTP to create user alice@company.com
-    client.post("/api/v1/auth/company/send-code", json={"email": "alice@company.com"})
-    _, otp = sender.sent[-1]
-    r_verify = client.post("/api/v1/auth/company/verify", json={"email": "alice@company.com", "code": otp})
-    assert r_verify.status_code == 200
-    original_user_id = r_verify.json()["user"]["id"]
-
-    # Start Google OAuth
-    r_start = client.get("/api/v1/auth/google", follow_redirects=False)
-    assert r_start.status_code == 302
-    state_cookie = r_start.cookies.get("oauth_state")
-    assert state_cookie
-
-    # State mismatch rejected
-    r_bad_state = client.get(
-        "/api/v1/auth/google/callback?code=abc&state=wrong-state",
-        follow_redirects=False,
-    )
-    assert r_bad_state.status_code == 400
-    assert r_bad_state.json()["error"]["code"] == "INVALID_OAUTH_STATE"
-
-    # Valid Google callback links to the SAME user record (no duplicate user)
-    r_cb = client.get(
-        f"/api/v1/auth/google/callback?code=valid-code&state={state_cookie}",
-        follow_redirects=False,
-    )
-    assert r_cb.status_code == 302
-    assert r_cb.headers["location"] == settings.FRONTEND_AUTH_SUCCESS_URL
-    assert r_cb.cookies.get("refresh_token") is not None
-
-    with ctx["db_factory"]() as db:
-        users = db.execute(select(User)).scalars().all()
-        identities = db.execute(select(AuthIdentity)).scalars().all()
-        assert len(users) == 1
-        assert str(users[0].id) == original_user_id
-        assert users[0].name == "Alice Employee"
-        assert {ident.provider for ident in identities} == {"COMPANY_EMAIL", "GOOGLE"}
-
-
-def test_google_oauth_rejects_unverified_or_non_corporate(ctx):
-    client = ctx["client"]
-    ctx["google_client"].user_info = GoogleUserInfo(
-        subject="google-sub-999",
-        email="alice@company.com",
-        email_verified=False,
-        name="Unverified",
-    )
-    r_start = client.get("/api/v1/auth/google", follow_redirects=False)
-    state_cookie = r_start.cookies.get("oauth_state")
-
-    r_cb = client.get(
-        f"/api/v1/auth/google/callback?code=abc&state={state_cookie}",
-        follow_redirects=False,
-    )
-    assert r_cb.status_code == 403
-    assert r_cb.json()["error"]["code"] == "CORPORATE_GOOGLE_ACCOUNT_REQUIRED"

@@ -1,4 +1,4 @@
-# API Manual Testing Guide (All 22 APIs)
+# API Manual Testing Guide (All 20 APIs)
 
 Step-by-step handbook to manually test every endpoint using **Swagger UI** or **PowerShell (`curl.exe`)**, showing exact request bodies, headers, **where each value comes from**, and what response to expect.
 
@@ -28,7 +28,7 @@ Step-by-step handbook to manually test every endpoint using **Swagger UI** or **
 |---|---|
 | `<OTP_CODE>` | Printed in the **User/Auth Service (`8001`) terminal** as `[DEV EMAIL OTP] To: ... \| Code: 123456` |
 | `<ACCESS_TOKEN>` | Returned in `access_token` from `POST /api/v1/auth/company/verify` or `POST /api/v1/auth/refresh` (valid 15 min) |
-| `refresh_token` cookie | Set automatically by the browser on `/verify`, `/google/callback`, and `/refresh` (HttpOnly cookie) |
+| `refresh_token` cookie | Set automatically by the browser on `/verify` and `/refresh` (HttpOnly cookie) |
 | `<VEHICLE_ID>` | Returned as `id` from `POST /api/v1/vehicles` or `GET /api/v1/vehicles` |
 | `<IDEMPOTENCY_KEY>` | Any fresh UUID you generate per booking attempt — in PowerShell: `[guid]::NewGuid().ToString()` |
 | `<BOOKING_ID>` | Returned as `booking_id` from `POST /api/v1/parking/bookings` |
@@ -40,9 +40,9 @@ Step-by-step handbook to manually test every endpoint using **Swagger UI** or **
 
 ---
 
-## 1. User/Auth Service (7 APIs — Port `8001`, via Gateway `8000`)
+## 1. User/Auth Service (5 APIs — Port `8001`, via Gateway `8000`)
 
-> **Check your domain:** Look at `COMPANY_EMAIL_DOMAIN` in `services/user-auth-service/.env` (default is `company.com`; if you set `gmail.com` for Google testing, use `@gmail.com` below).
+> **Corporate email only:** Uses `COMPANY_EMAIL_DOMAIN` in `services/user-auth-service/.env` (default: `company.com`).
 
 ### 1.1 `POST /api/v1/auth/company/send-code`
 - **Auth:** None (public)
@@ -70,16 +70,7 @@ Step-by-step handbook to manually test every endpoint using **Swagger UI** or **
 - **Expected (`200 OK`):** Returns `access_token`, `expires_in` (`900`), `user` (`id`, `email`, `name`), AND sets HttpOnly `refresh_token` cookie.
 - **Save:** Copy `access_token` as `<ACCESS_TOKEN>`.
 
-### 1.3 `GET /api/v1/auth/google`
-- **Auth:** None (public)
-- **How to test:** Open **`http://127.0.0.1:8001/api/v1/auth/google`** (or `:8000` if redirect URI is set to `:8000`) **directly in your browser address bar** (not Swagger Execute, because Google blocks CORS `fetch`).
-- **Expected:** `302 Redirect` to Google Sign-In + sets `oauth_state` cookie.
-
-### 1.4 `GET /api/v1/auth/google/callback`
-- **Auth:** Automatic (Google redirects here with `?code=...&state=...`).
-- **Expected:** Validates state & corporate domain, auto-links to existing `users` row if email matches, sets `refresh_token` cookie, redirects `302` to `FRONTEND_AUTH_SUCCESS_URL` (`localhost:3000/auth/callback`).
-
-### 1.5 `GET /api/v1/users/me`
+### 1.3 `GET /api/v1/users/me`
 - **Auth:** `Authorization: Bearer <ACCESS_TOKEN>` (Swagger **Authorize 🔒** or header)
 - **Body:** None
 - **Expected (`200 OK`):**
@@ -87,12 +78,12 @@ Step-by-step handbook to manually test every endpoint using **Swagger UI** or **
   { "id": "<user-uuid>", "email": "employee@company.com", "name": null }
   ```
 
-### 1.6 `POST /api/v1/auth/refresh`
-- **Auth:** Automatic browser `refresh_token` HttpOnly cookie (from step 1.2 or 1.4).
+### 1.4 `POST /api/v1/auth/refresh`
+- **Auth:** Automatic browser `refresh_token` HttpOnly cookie (from step 1.2).
 - **Body:** None
 - **Expected (`200 OK`):** Returns a brand-new `access_token` AND rotates the `refresh_token` cookie (old refresh token is revoked).
 
-### 1.7 `POST /api/v1/auth/logout`
+### 1.5 `POST /api/v1/auth/logout`
 - **Auth:** Automatic browser `refresh_token` cookie.
 - **Body:** None
 - **Expected (`200 OK`):** `{"message": "Logged out successfully"}` and revokes/clears the refresh cookie. Calling `/refresh` afterward returns `401 UNAUTHENTICATED`.

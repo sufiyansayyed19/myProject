@@ -55,7 +55,7 @@ A plain-English learning guide explaining **why** each package and backend patte
   2. **`pydantic-settings`** loads `.env` files into typed Python objects so secrets never live in Git.
 - **Project example:**
   - When a user sends `{"vehicle_number": "mh 12-ab 1234", "vehicle_type": "TRUCK"}`, `VehicleCreate` normalizes the plate to `"MH12AB1234"` and immediately rejects `"TRUCK"` with `422 INVALID_VEHICLE_DATA`.
-  - In `user-auth-service/app/core/config.py`, `Settings()` reads `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` from `.env` automatically.
+  - In `user-auth-service/app/core/config.py`, `Settings()` reads `COMPANY_EMAIL_DOMAIN` and `OTP_HMAC_SECRET` from `.env` automatically.
 
 ---
 
@@ -65,14 +65,13 @@ A plain-English learning guide explaining **why** each package and backend patte
 
 ---
 
-## 8. `httpx` — Making HTTP Calls Between Services (and to Google)
+## 8. `httpx` — Making HTTP Calls Between Services
 - **Problem it solves:** In a microservice architecture, services **cannot** query each other's databases directly—they must talk over HTTP. Python's standard library (`urllib`) is clunky; `httpx` gives clean timeouts, headers, status codes, both sync (`Client`) and async (`AsyncClient`), and `MockTransport` for tests.
-- **Project examples (5 places we use `httpx`):**
-  1. **API Gateway (`8000`) → All 4 services:** `httpx.AsyncClient` forwards public `/api/v1/*` requests and preserves `302` redirects + `Set-Cookie` headers.
-  2. **User/Auth (`8001`) → Google:** Exchanges OAuth `code` at `https://oauth2.googleapis.com/token` and fetches `/userinfo`.
-  3. **Parking (`8003`) → Vehicle (`8002`):** Validates that `vehicle_id` belongs to the caller and checks `is_ev` / `vehicle_type`.
-  4. **Parking (`8003`) → Payment (`8004`):** Calls `POST /internal/v1/payments` (with 2 inline retries + 3s timeout).
-  5. **Payment (`8004`) → Parking (`8003`):** Delivers `POST /internal/v1/bookings/{id}/payment-result` callback after simulated payment succeeds/fails.
+- **Project examples (4 places we use `httpx`):**
+  1. **API Gateway (`8000`) → All 4 services:** `httpx.AsyncClient` forwards public `/api/v1/*` requests and preserves `Set-Cookie` headers.
+  2. **Parking (`8003`) → Vehicle (`8002`):** Validates that `vehicle_id` belongs to the caller and checks `is_ev` / `vehicle_type`.
+  3. **Parking (`8003`) → Payment (`8004`):** Calls `POST /internal/v1/payments` (with 2 inline retries + 3s timeout).
+  4. **Payment (`8004`) → Parking (`8003`):** Delivers `POST /internal/v1/bookings/{id}/payment-result` callback after simulated payment succeeds/fails.
 
 ---
 
@@ -88,7 +87,7 @@ A plain-English learning guide explaining **why** each package and backend patte
 ## 10. `pytest` — Automated Safety Net
 - **Problem it solves:** Manually clicking 22 endpoints in Swagger every time you change 1 line of code is slow and misses edge cases (like two users clicking "Book" at the exact same millisecond).
 - **Project example:** Running `.\scripts\run_all_tests.ps1` automatically tests:
-  - OTP expiry/attempts, refresh token rotation, and Google account linking (`test_auth.py`).
+  - OTP expiry/attempts, refresh token rotation, and logout (`test_auth.py`).
   - Plate normalization, soft delete + re-registration, and fail-closed `503` (`test_vehicles.py`).
   - Sunday closure, `08:44` vs `08:45`, `09:20` vs `09:35`, `09:54` vs `09:55` cancel cutoff (`test_parking.py`).
   - **10 simultaneous threads racing for 5 EV-bike slots** against real PostgreSQL (`test_pg_concurrency.py`).

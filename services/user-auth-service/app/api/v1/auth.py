@@ -1,9 +1,6 @@
-import hmac
-import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Cookie, Depends, Query, Response
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Cookie, Depends, Response
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -31,12 +28,10 @@ from app.schemas.auth import (
     VerifyCodeRequest,
 )
 from app.services.email_sender import EmailSender, get_email_sender
-from app.services.google_oauth import GoogleOAuthClient, get_google_oauth_client
 
 router = APIRouter(prefix="/api/v1", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "refresh_token"
-OAUTH_STATE_COOKIE_NAME = "oauth_state"
 
 
 def _utcnow() -> datetime:
@@ -196,89 +191,6 @@ def verify_company_code(
         expires_in=expires_in,
         user=UserProfile.model_validate(user),
     )
-
-
-@router.get("/auth/google")
-def start_google_oauth(
-    google_client: GoogleOAuthClient = Depends(get_google_oauth_client),
-):
-    state = secrets.token_urlsafe(32)
-    auth_url = google_client.build_authorization_url(state=state)
-    redirect = RedirectResponse(url=auth_url, status_code=302)
-    redirect.set_cookie(
-        key=OAUTH_STATE_COOKIE_NAME,
-        value=state,
-        httponly=True,
-        secure=_is_cookie_secure(),
-        samesite="lax",
-        max_age=300,
-        path="/api/v1/auth/google",
-    )
-    return redirect
-
-
-@router.get("/auth/google/callback")
-def google_oauth_callback(
-    code: str | None = Query(default=None),
-    state: str | None = Query(default=None),
-    error: str | None = Query(default=None),
-    oauth_state: str | None = Cookie(default=None, alias=OAUTH_STATE_COOKIE_NAME),
-    db: Session = Depends(get_db),
-    google_client: GoogleOAuthClient = Depends(get_google_oauth_client),
-):
-    if error:
-        raise AppError(401, "GOOGLE_AUTHENTICATION_FAILED", "Google authentication was cancelled or failed.")
-
-    if not code or not state or not oauth_state or not hmac.compare_digest(state, oauth_state):
-        raise AppError(400, "INVALID_OAUTH_STATE", "Invalid or missing OAuth state.")
-
-    google_info = google_client.exchange_code_for_userinfo(code)
-    normalized_email = normalize_email(google_info.email)
-
-    if not google_info.email_verified or not is_allowed_corporate_email(normalized_email):
-        raise AppError(
-            403,
-            "CORPORATE_GOOGLE_ACCOUNT_REQUIRED",
-            "A verified corporate Google account is required.",
-        )
-
-    identity = db.execute(
-        select(AuthIdentity).where(
-            AuthIdentity.provider == "GOOGLE",
-            AuthIdentity.provider_subject == google_info.subject,
-        )
-    ).scalar_one_or_none()
-
-    if identity is not None:
-        user = db.get(User, identity.user_id)
-        if user and not user.name and google_info.name:
-            user.name = google_info.name[:100]
-    else:
-        # Automatic account linking on verified corporate email match (A-42)
-        user = db.execute(select(User).where(User.email == normalized_email)).scalar_one_or_none()
-        if user is None:
-            user = User(email=normalized_email, name=google_info.name[:100] if google_info.name else None)
-            db.add(user)
-            db.flush()
-        elif not user.name and google_info.name:
-            user.name = google_info.name[:100]
-
-        db.add(
-            AuthIdentity(
-                user_id=user.id,
-                provider="GOOGLE",
-                provider_subject=google_info.subject,
-                provider_email=normalized_email,
-            )
-        )
-
-    raw_refresh = _create_refresh_session(db, user)
-    db.commit()
-
-    redirect = RedirectResponse(url=settings.FRONTEND_AUTH_SUCCESS_URL, status_code=302)
-    _set_refresh_cookie(redirect, raw_refresh)
-    redirect.delete_cookie(key=OAUTH_STATE_COOKIE_NAME, path="/api/v1/auth/google")
-    return redirect
 
 
 @router.get("/users/me", response_model=UserProfile)
