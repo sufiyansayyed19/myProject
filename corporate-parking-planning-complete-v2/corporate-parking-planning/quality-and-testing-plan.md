@@ -57,7 +57,7 @@ Adopted consistently across the Gateway and all four business services (`400` ma
 | `422` | Request fields are well-formed but fail schema/semantic validation |
 | `429` | Rate limit or verification attempt limit exceeded |
 | `500` | Unexpected internal error |
-| `502` | External provider/upstream returned an unusable response (for example, email/Google provider failure) |
+| `502` | External email delivery provider failed |
 | `503` | Required internal service is unavailable or timed out |
 
 The exact 400/422 mapping should be consistent across services. Existing endpoint documents sometimes group these as `400/422`; the final implementation contract should choose one rule per failure type.
@@ -93,8 +93,7 @@ Tests should verify:
 - internal endpoints reject calls without valid service authentication;
 - internal paths are not routed by the public Gateway;
 - Gateway strips client-supplied internal service-auth headers;
-- OTP is not returned or logged, expires, is one-time and has attempt/rate limits;
-- Google OAuth state validation and corporate-domain policy are enforced;
+- OTP is not returned or logged in production, expires, is one-time and has attempt/cooldown limits;
 - secrets and tokens do not appear in logs or error bodies;
 - simulated payment never collects real card/UPI secrets.
 
@@ -110,11 +109,8 @@ Tests should verify:
 - expired OTP rejection;
 - old OTP invalidated after resend;
 - OTP cannot be reused after successful verification;
-- attempt cap and resend rate limit;
-- Google state mismatch rejection;
-- unverified/non-corporate Google identity rejection;
-- identity resolution/account linking according to the final approved policy;
-- refresh-session revoke/rotation behavior if that model is selected.
+- attempt cap and resend cooldown;
+- refresh-session revoke and rotation behavior.
 
 ### 5.2 Vehicle Service
 

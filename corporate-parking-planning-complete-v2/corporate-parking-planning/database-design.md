@@ -41,7 +41,7 @@ Each business service owns its data. No service directly queries or updates anot
 | `created_at` | TIMESTAMPTZ | No | Creation time |
 | `updated_at` | TIMESTAMPTZ | No | Last update time |
 
-The earlier draft placed a single `auth_provider` column on `users`. That is insufficient if the same user can authenticate through both company email and Google. Provider identity belongs in a separate `auth_identities` table.
+The `auth_identities` table separates provider identities from `users` so corporate-email OTP (`COMPANY_EMAIL`) is cleanly modeled and extensible if additional corporate SSO providers are added later.
 
 ### 3.2 `auth_identities`
 
@@ -49,8 +49,8 @@ The earlier draft placed a single `auth_provider` column on `users`. That is ins
 |---|---|---:|---|
 | `id` | UUID | No | Primary key |
 | `user_id` | UUID | No | FK to `users.id` in the same database |
-| `provider` | VARCHAR(30) | No | `COMPANY_EMAIL` or `GOOGLE` |
-| `provider_subject` | VARCHAR(255) | No | Stable provider-side subject; normalized email for company-email identity, Google subject ID for Google |
+| `provider` | VARCHAR(30) | No | `COMPANY_EMAIL` (Google OAuth dropped from scope) |
+| `provider_subject` | VARCHAR(255) | No | Stable provider-side subject (normalized corporate email) |
 | `provider_email` | VARCHAR(255) | Yes | Verified provider email captured at authentication time |
 | `created_at` | TIMESTAMPTZ | No | Creation time |
 
@@ -58,9 +58,7 @@ Constraints/indexes:
 - FK `user_id -> users.id`.
 - `UNIQUE(provider, provider_subject)`.
 - Index `user_id`.
-- Validate provider values using a check constraint or controlled enum.
-
-Account linking behavior when provider identities resolve to the same email remains open and is specified in `api-auth-service.md`.
+- Validate provider values using a check constraint.
 
 ### 3.3 `verification_codes`
 

@@ -15,7 +15,7 @@ The four business services' stack is agreed as Python + FastAPI + synchronous SQ
 | Component | Publicly reachable by frontend? | Owns data? | Primary role |
 |---|---:|---:|---|
 | API Gateway | Yes | No | Public ingress, routing, CORS and request-level concerns |
-| User/Auth Service | Through Gateway | Yes | User identities, email verification, OAuth and token/session lifecycle |
+| User/Auth Service | Through Gateway | Yes | User identities, corporate-email OTP verification and token/session lifecycle |
 | Vehicle Service | Through Gateway | Yes | Registered vehicle records |
 | Parking Service | Through Gateway | Yes | Slots, availability, bookings, holds and booking status |
 | Payment Service | Through Gateway | Yes | Simulated payment records and callback delivery state |
@@ -216,27 +216,19 @@ For `Parking → Payment`, `Payment → Parking`, and `Vehicle → Parking`, the
 
 mTLS, a centralized workload identity platform, automated secret rotation and network policy are possible production improvements. They are not required to add more microservices to the current project.
 
-## 10. Google OAuth and email verification security
-
-### Company email verification
+## 10. Corporate email OTP verification security
 
 - Normalize email consistently before domain checks and storage.
-- Compare the domain to a configurable allowlist/domain setting; do not hardcode a domain in application logic.
-- Generate a cryptographically secure random code.
-- Store a protected hash, not the plaintext code.
+- Compare the domain to `COMPANY_EMAIL_DOMAIN`; do not hardcode a domain in application logic.
+- Generate a cryptographically secure 6-digit random code.
+- Store a keyed HMAC-SHA256 hash (`OTP_HMAC_SECRET`), never the plaintext code.
 - Expire codes after the planned five-minute lifetime.
 - Invalidate the previous active code when a new one is issued.
-- Enforce attempt and resend limits.
+- Enforce attempt (max 5) and resend cooldown (60s) limits via PostgreSQL.
 - Consume a code after successful use; do not allow replay.
-- Never include the code in API responses or application logs.
+- Never include the code in API responses or production logs.
 
-### Google OAuth
-
-- Configure Google client ID, Google client secret, redirect URI, and allowed corporate email domain via environment variables (never hardcode or commit secrets).
-- Validate OAuth `state` to prevent login CSRF.
-- Use PKCE where supported by the selected client flow.
-- Validate provider identity/token claims, require Google `email_verified = true`, and enforce the corporate-domain policy.
-- **Agreed account linking:** when normalized verified corporate emails match (verified OTP identity + Google `email_verified = true` under the corporate domain), associate both provider identities in `auth_identities` with the same `users` record. Never link based on an unverified email.
+Google OAuth is explicitly excluded from scope; authentication is purely corporate-email OTP based.
 
 ## 11. Authorization rules by resource
 

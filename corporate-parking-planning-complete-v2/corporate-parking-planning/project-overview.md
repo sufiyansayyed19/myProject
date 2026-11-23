@@ -173,7 +173,7 @@ Previously open items that are now **Agreed**:
 - Synchronous SQLAlchemy (`Session`) with `psycopg` (v3) and synchronous FastAPI handlers (`def`) across all four business services.
 - Four separately owned PostgreSQL databases (`user_db`, `vehicle_db`, `parking_db`, `payment_db`) on one local PostgreSQL server with separate roles/credentials.
 - Independent Alembic migrations per service.
-- Automatic account linking when verified corporate emails match (requiring verified OTP and Google `email_verified = true` under the configured corporate domain).
+- Authentication is purely corporate-email OTP (`COMPANY_EMAIL_DOMAIN`); Google OAuth was dropped from scope.
 - Same-hour booking uses the nominal whole-hour block (`09:00–10:00` at `09:20`) and charges the full one-hour rate without prorating; because `09:00` has passed, it is not cancellable under the strict >5-minute rule.
 
 All pre-implementation blockers are now **Closed** for the sprint demonstration baseline in `decisions-and-open-questions.md` (including concurrency locking, lazy hold expiry, inline payment/callback retries, RS256 15-min JWT + 7-day refresh cookie, `X-Internal-Service-Token` auth, and common error envelope). Only non-blocking deployment polish items remain deferred.

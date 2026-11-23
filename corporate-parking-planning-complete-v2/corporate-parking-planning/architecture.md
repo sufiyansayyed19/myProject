@@ -19,7 +19,7 @@ The repository is a monorepo with `services/user-auth-service`, `services/vehicl
 | Component | Classification | Owns | Responsibilities |
 |---|---|---|---|
 | API Gateway | Infrastructure component | No business database | Public frontend entry point, routing and common request handling |
-| User/Auth Service | Business microservice | User/Auth data | Corporate email verification, Google OAuth, user identity, access/refresh authentication |
+| User/Auth Service | Business microservice | User/Auth data | Corporate email OTP verification, user identity, RS256 JWT and refresh-session authentication |
 | Vehicle Service | Business microservice | Vehicle data | Register, list, retrieve, update and deactivate user vehicles |
 | Parking Service | Business microservice | Slot inventory and bookings | Availability, booking validation, slot allocation, temporary holds, pricing, cancellation and booking history |
 | Payment Service | Business microservice | Payment records | Create and simulate payment attempts, expose payment status, report result to Parking |
@@ -43,7 +43,6 @@ flowchart TB
     PS --- PDB[(Parking database)]
     PAY --- PAYDB[(Payment database)]
 
-    GOOGLE[Google OAuth] <--> UA
     EMAIL[Email provider] <-- UA
 ```
 
@@ -57,10 +56,9 @@ The Gateway handles frontend ingress. Internal service-to-service calls should u
 
 **Does:**
 - validate the configured corporate email domain;
-- generate, hash, expire and verify email codes;
-- initiate and complete Google OAuth;
+- generate, hash, expire and verify email OTP codes;
 - create or resolve an application user identity;
-- issue access tokens and manage refresh sessions;
+- issue RS256 access tokens and manage revocable refresh sessions;
 - return the authenticated user's profile.
 
 **Does not:** own vehicles, parking bookings or payment records.
@@ -189,8 +187,7 @@ Internal service endpoints must not be exposed as public Gateway routes.
 
 | External system | Used by | Reason |
 |---|---|---|
-| Corporate email provider | User/Auth | Deliver email verification code |
-| Google OAuth | User/Auth | Optional identity authentication path |
+| Corporate email provider | User/Auth | Deliver email OTP verification code (pluggable; console mock in dev) |
 | Real payment provider | None in current scope | Future integration only |
 | Physical parking hardware | None | Explicitly outside current scope |
 

@@ -62,21 +62,21 @@ Do not change an item from Proposed/Open to Agreed merely because it appears in 
 | A-39 | Approve `GET /internal/v1/vehicles/{vehicle_id}/booking-dependency` on Parking Service; Vehicle Service calls it before update/deactivation and rejects with `409 Conflict` if a future/active `CONFIRMED` or valid unexpired `PAYMENT_PENDING` booking exists | Agreed |
 | A-40 | Booking creation idempotency via `Idempotency-Key` header (client UUID) on `POST /api/v1/parking/bookings`, persisted per user (`user_id` + `idempotency_key`); identical payload replays original result, differing payload returns `409 Conflict` | Agreed |
 | A-41 | Historical vehicle snapshots on `bookings`: `vehicle_number_snapshot`, `vehicle_type_snapshot`, `is_ev_snapshot` alongside logical `vehicle_id` and `requires_charging` | Agreed |
-| A-42 | Automatic account linking with verified identity: normalize emails, verify OTP, require Google `email_verified = true` + corporate domain; link matching verified corporate emails to one `users` row with separate `auth_identities` records (never link on unverified email) | Agreed |
+| A-42 | Authentication is purely corporate-email OTP (`COMPANY_EMAIL_DOMAIN`); Google OAuth (`/auth/google`, `/auth/google/callback`) was dropped from scope | Agreed |
 | A-43 | Deterministic backend-controlled payment simulation via `PAYMENT_SIMULATION_DEFAULT_OUTCOME=SUCCESS` and non-production-only test override header (e.g., `X-Test-Payment-Outcome: FAILED`); disabled in production; no client-supplied status; no random-only outcomes | Agreed |
-| A-44 | Pluggable email OTP sender interface (console/log mock sender in local dev; never expose OTP in API responses; never log OTPs in production; SMTP/provider-ready) and env-configured Google OAuth settings (client ID, client secret, redirect URI, allowed corporate domain) | Agreed |
+| A-44 | Pluggable email OTP sender interface (console/log mock sender in local dev; never expose OTP in API responses; never log OTPs in production; SMTP/provider-ready) | Agreed |
 
 ## 3. API inventory baseline
 
-The approved operation count is **22** when both public and internal operations are counted:
+The approved operation count is **20** when both public and internal operations are counted (Google OAuth dropped):
 
 | Service | Operations in baseline | Notes |
 |---|---:|---|
-| User/Auth | 7 | Company send-code, company verify, Google start, Google callback, users/me, logout, refresh |
+| User/Auth | 5 | Company send-code, company verify, users/me, logout, refresh |
 | Vehicle | 5 | Create, list, get, update, deactivate |
 | Parking | 7 | Five user-facing operations, Payment result callback, and Vehicle booking-dependency check |
 | Payment | 3 | Internal payment creation plus two user-facing operations |
-| **Total** | **22** | Internal and public operations are both counted |
+| **Total** | **20** | Internal and public operations are both counted |
 
 Route/exposure summary:
 - Payment creation is `POST /internal/v1/payments` (internal only; called by Parking Service).
@@ -100,7 +100,7 @@ Route/exposure summary:
 | Q-10 | Vehicle dependency check | Resolved (A-39): Approved `GET /internal/v1/vehicles/{vehicle_id}/booking-dependency` on Parking Service; blocks on future/active `CONFIRMED` or valid unexpired `PAYMENT_PENDING` bookings (`409 Conflict`). | Closed |
 | Q-11 | Historical vehicle data | Resolved (A-41): Store immutable `vehicle_number_snapshot`, `vehicle_type_snapshot`, and `is_ev_snapshot` on `bookings` alongside `vehicle_id`. | Closed |
 | Q-12 | Auth refresh endpoint | Resolved (A-38): Approved `POST /api/v1/auth/refresh` with short-lived RS256 access JWT, Secure HttpOnly refresh cookie, rotation, and server-side revocation. | Closed |
-| Q-13 | Account linking | Resolved (A-42): Automatic linking when normalized verified corporate emails match (verified OTP + Google `email_verified = true` + corporate domain), preserving separate `auth_identities` rows. | Closed |
+| Q-13 | Account linking / Google OAuth | Closed (A-42): Google OAuth dropped from scope; authentication is purely corporate-email OTP based. | Closed |
 | Q-14 | JWT & refresh details | Resolved (Sprint Demo Baseline): RS256 access JWT (15-min lifetime; claims `iss`, `aud`, `sub`, `iat`, `exp`); opaque 7-day refresh token hashed in `refresh_sessions`, rotated on `/auth/refresh`; dev RSA keypair generated via local script and loaded from env. | Closed |
 | Q-15 | Internal service authentication | Resolved (Sprint Demo Baseline): Standard header `X-Internal-Service-Token` with per-direction env tokens (`PARKING_TO_VEHICLE_TOKEN`, `PARKING_TO_PAYMENT_TOKEN`, `PAYMENT_TO_PARKING_TOKEN`, `VEHICLE_TO_PARKING_TOKEN`). `Parking -> Vehicle` forwards user `Authorization: Bearer <jwt>` + `X-Internal-Service-Token`. Gateway strips `X-Internal-Service-Token` and blocks `/internal/v1/*`. | Closed |
 | Q-16 | Database topology | Resolved (A-37): Four separate PostgreSQL databases (`user_db`, `vehicle_db`, `parking_db`, `payment_db`) with separate credentials/roles per service. | Closed |
@@ -178,3 +178,4 @@ All pre-implementation blockers (`Q-01` through `Q-25`, `Q-27`–`Q-29`, `Q-33`�
 | Stack decision update | Selected Python + FastAPI + SQLAlchemy for the four business services; recorded SQLAlchemy sync/async mode and migration tool as open decisions |
 | Decision approval update | Approved monorepo + FastAPI Gateway, synchronous SQLAlchemy (`Session`) + `psycopg` v3, independent Alembic per service, 4 PostgreSQL DBs, nominal whole-hour same-hour booking/billing, `POST /api/v1/auth/refresh` (RS256 + Secure HttpOnly refresh cookie + rotation), `GET /internal/v1/vehicles/{vehicle_id}/booking-dependency` (22-operation baseline), `Idempotency-Key` on booking create, historical vehicle snapshots, verified automatic account linking, deterministic backend-controlled payment simulation, pluggable OTP email sender, and env-based Google OAuth config |
 | Milestone 0 (m0) sprint-demo finalization | Closed all remaining blockers (`Q-06`–`Q-09`, `Q-14`, `Q-15`, `Q-17`, `Q-19`–`Q-22`, `Q-24`, `Q-25`, `Q-27`–`Q-29`, `Q-33`): advisory lock + `FOR UPDATE` slot locking, lazy hold expiry (no background worker), 2 inline retries for payment create & callback (no background retry worker), RS256 15-min JWT + 7-day refresh cookie, `X-Internal-Service-Token` per-direction tokens, standard error envelope, `VARCHAR + CHECK`, partial unique index for active vehicles, DB-only OTP checks, `X-Request-ID`, and `GET /health` |
+| Auth scope simplification (m2 iter-02) | Dropped Google OAuth (`/api/v1/auth/google`, `/api/v1/auth/google/callback`) — authentication is purely corporate-email OTP (`COMPANY_EMAIL_DOMAIN`); total API baseline updated from 22 to 20 (17 public + 3 internal) |

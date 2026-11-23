@@ -8,7 +8,7 @@ This document joins the service-level API contracts into complete user journeys.
 
 ## 2. Core workflows at a glance
 
-1. Company email authentication or Google OAuth.
+1. Corporate email OTP authentication.
 2. Vehicle registration and maintenance.
 3. Informational parking availability lookup.
 4. Booking creation, temporary hold and payment creation.
@@ -49,25 +49,9 @@ Agreed/planned behavior:
 
 Open details: resend cooldown, rate-limit thresholds, code retention, token/session lifetime and user display-name collection.
 
-## 4. Google OAuth workflow
+## 4. Google OAuth workflow (Removed from Scope)
 
-```mermaid
-sequenceDiagram
-    participant FE as Browser
-    participant UA as User/Auth
-    participant G as Google
-    FE->>UA: GET /auth/google
-    UA-->>FE: Redirect to Google with state
-    FE->>G: User authenticates/consents
-    G-->>UA: Redirect callback with code + state
-    UA->>UA: Validate state and exchange code
-    UA->>G: Retrieve/validate identity
-    G-->>UA: Verified identity claims
-    UA->>UA: Enforce corporate eligibility and resolve identity
-    UA-->>FE: Establish application authentication / redirect
-```
-
-OAuth `state`, token validation, Google `email_verified = true`, and corporate eligibility checks are required. PKCE is recommended where supported. **Agreed account linking:** if the verified corporate email matches an existing OTP-verified corporate email, both provider identities in `auth_identities` are linked to the same `users` record (never link on an unverified email).
+Google OAuth was explicitly dropped from scope because authentication is purely corporate-email OTP based for company employees.
 
 ## 5. Vehicle registration and selection workflow
 

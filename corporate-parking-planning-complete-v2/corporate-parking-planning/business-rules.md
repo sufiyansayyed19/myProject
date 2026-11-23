@@ -206,8 +206,8 @@ Real payment-provider integration, provider webhooks, refunds and financial reco
 
 ## 12. Authentication and access rules
 
-- Company email verification is supported, restricted to a configurable corporate email domain.
-- Google OAuth is also in the planned API surface, but the authenticated Google identity must satisfy the corporate-domain policy.
+- Authentication is purely corporate-email OTP verification, restricted to a configurable corporate email domain (`COMPANY_EMAIL_DOMAIN`).
+- Google OAuth is explicitly excluded from scope because the system serves corporate employees only.
 - A domain check models the project's eligibility rule; it is not proof of current employment in a real organization.
 - User-owned vehicle, booking and payment operations derive the user identity from authentication, not from a client-supplied `user_id`.
 - A user must not access another user's vehicle, booking or payment by guessing an identifier.
